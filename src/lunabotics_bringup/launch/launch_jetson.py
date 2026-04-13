@@ -8,11 +8,43 @@ Prerequisites on Jetson:
   export ROS_LOCALHOST_ONLY=0
 """
 
+import os
+
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    realsense_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
+        ]),
+        launch_arguments={
+            'pointcloud.enable': 'true',
+            'depth_module.profile': '640x480x30',
+            'ordered_pc': 'true'
+        }.items()
+    )
+
+    static_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='lidar_to_camera_tf',
+        arguments=[
+            '0.20',  # X: 20cm forward
+            '0.0',   # Y: centered
+            '-0.10', # Z: 10cm below the top-mounted lidar
+            '0.0',   # Yaw: facing straight ahead
+            '0.26',  # Pitch: ~15 degrees downward (Positive pitch in ROS is tilting DOWN)
+            '0.0',   # Roll: no tilt
+            'unilidar_lidar',
+            'camera_link'
+        ]
+    )
+
     lidar_node = Node(
         package='unitree_lidar_ros2',
         executable='unitree_lidar_ros2_node',
@@ -81,6 +113,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        realsense_node,
+        static_tf,
         lidar_node,
         pointcloud_to_laserscan_node,
         octomap_node,
