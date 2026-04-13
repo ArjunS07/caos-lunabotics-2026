@@ -13,6 +13,37 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    tf_base_link = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_bringup'),
+                'launch',
+                'tf_base_link.launch.py',
+            ),
+        ]),
+    )
+
+    localization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_localization'),
+                'launch',
+                'localization.launch.py',
+            ),
+        ]),
+        launch_arguments={'use_imu_fusion': 'true'}.items(),
+    )
+
+    depth_scan = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_localization'),
+                'launch',
+                'depth_scan.launch.py',
+            ),
+        ]),
+    )
+
     # 1. RealSense Driver
     realsense_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -116,10 +147,13 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        tf_base_link,
         realsense_node,
         node1,
         static_tf,
         pointcloud_to_laserscan_node,
+        localization,
+        depth_scan,
         octomap_node,
         rviz_node,
     ])

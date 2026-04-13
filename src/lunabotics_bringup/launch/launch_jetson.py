@@ -44,6 +44,26 @@ def generate_launch_description():
             'camera_link'
         ]
     )
+    tf_base_link = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_bringup'),
+                'launch',
+                'tf_base_link.launch.py',
+            ),
+        ]),
+    )
+
+    localization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_localization'),
+                'launch',
+                'localization.launch.py',
+            ),
+        ]),
+        launch_arguments={'use_imu_fusion': 'false'}.items(),
+    )
 
     lidar_node = Node(
         package='unitree_lidar_ros2',
@@ -115,7 +135,9 @@ def generate_launch_description():
     return LaunchDescription([
         realsense_node,
         static_tf,
+        tf_base_link,
         lidar_node,
         pointcloud_to_laserscan_node,
+        localization,
         octomap_node,
     ])
