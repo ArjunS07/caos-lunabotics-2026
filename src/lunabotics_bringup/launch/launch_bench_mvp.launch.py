@@ -1,11 +1,10 @@
 """
-All-in-one launch file for single-machine development.
-Starts: RealSense D435i, Unitree LiDAR L2, TF, pointcloud_to_laserscan,
-        octomap_server, and RViz.
+Bench / cart MVP: LiDAR only (no RealSense), rf2o odometry + octomap + RViz.
 
-CHANGELOG
-Arjun 10 apr
-- Added transformation in section 3 to map depth camera to lidar coordinates
+Use when the sensor is on a box/cart and you push it around to validate
+TF, /scan, /odom_rf2o, and mapping — without IMU fusion (same as Jetson stack + RViz).
+
+Pose output: /odom_rf2o and TF odom→base_link (no /odometry/filtered unless you enable IMU).
 """
 
 import os
@@ -36,34 +35,10 @@ def generate_launch_description():
                 'localization.launch.py',
             ),
         ]),
-        launch_arguments={'use_imu_fusion': 'true'}.items(),
+        launch_arguments={'use_imu_fusion': 'false'}.items(),
     )
 
-    depth_scan = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('lunabotics_localization'),
-                'launch',
-                'depth_scan.launch.py',
-            ),
-        ]),
-    )
-
-    # 1. RealSense Driver
-    # Pulls in the official launch logic for the D435i
-    realsense_node = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
-        ]),
-        launch_arguments={
-            'pointcloud.enable': 'true',          # Required for 3D data
-            'depth_module.profile': '640x480x30', # Optimized for Orin Nano
-            'ordered_pc': 'true'
-        }.items()
-    )
-
-    # 2. Unitree Lidar node
-    node1 = Node(
+    lidar_node = Node(
         package='unitree_lidar_ros2',
         executable='unitree_lidar_ros2_node',
         name='unitree_lidar_ros2_node',
@@ -81,42 +56,25 @@ def generate_launch_description():
             {'lidar_ip': '192.168.1.62'},
             {'local_port': 6201},
             {'local_ip': '192.168.1.2'},
-            {'cloud_frame': "unilidar_lidar"},
-            {'cloud_topic': "unilidar/cloud"},
-            {'imu_frame': "unilidar_imu"},
-            {'imu_topic': "unilidar/imu"},
-        ]
+            {'cloud_frame': 'unilidar_lidar'},
+            {'cloud_topic': 'unilidar/cloud'},
+            {'imu_frame': 'unilidar_imu'},
+            {'imu_topic': 'unilidar/imu'},
+        ],
     )
 
-    # 3. Static Transform: Lidar → Camera
-    # Change these values to match the actual physical sensor placement.
-    static_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='lidar_to_camera_tf',
-        arguments=[
-            '0.20',  # X: 20cm forward
-            '0.0',   # Y: centered
-            '-0.10', # Z: 10cm below the top-mounted lidar
-            '0.0',   # Yaw: facing straight ahead
-            '0.26',  # Pitch: ~15 degrees downward (Positive pitch in ROS is tilting DOWN)
-            '0.0',   # Roll: no tilt
-            'unilidar_lidar',
-            'camera_link'
-        ]
-    )
-
-    # 4. Convert PointCloud2 → LaserScan
     pointcloud_to_laserscan_node = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan',
         parameters=[{
             'target_frame': 'unilidar_lidar',
+            'transform_tolerance': 0.01,
             'min_height': -0.1,
             'max_height': 1.5,
             'angle_min': -3.14159,
             'angle_max': 3.14159,
+            'angle_increment': 0.00872,
             'range_min': 0.1,
             'range_max': 50.0,
             'use_inf': True,
@@ -125,10 +83,8 @@ def generate_launch_description():
             ('cloud_in', '/unilidar/cloud'),
             ('scan', '/scan'),
         ],
-        arguments=['--ros-args', '--qos-overrides', '/scan:=sensor_data']
     )
 
-    # 5. Octomap Server
     octomap_node = Node(
         package='octomap_server',
         executable='octomap_server_node',
@@ -146,10 +102,9 @@ def generate_launch_description():
             'sensor_model/min': 0.12,
             'sensor_model/max': 0.97,
         }],
-        remappings=[('cloud_in', '/unilidar/cloud')]
+        remappings=[('cloud_in', '/unilidar/cloud')],
     )
 
-    # 6. RViz
     rviz_config_file = os.path.join(
         get_package_share_directory('lunabotics_bringup'), 'rviz', 'view.rviz'
     )
@@ -158,17 +113,14 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         arguments=['-d', rviz_config_file],
-        output='log'
+        output='log',
     )
 
     return LaunchDescription([
         tf_base_link,
-        realsense_node,
-        node1,
-        static_tf,
+        lidar_node,
         pointcloud_to_laserscan_node,
         localization,
-        depth_scan,
         octomap_node,
         rviz_node,
     ])

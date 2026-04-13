@@ -8,11 +8,37 @@ Prerequisites on Jetson:
   export ROS_LOCALHOST_ONLY=0
 """
 
+import os
+
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    tf_base_link = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_bringup'),
+                'launch',
+                'tf_base_link.launch.py',
+            ),
+        ]),
+    )
+
+    localization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_localization'),
+                'launch',
+                'localization.launch.py',
+            ),
+        ]),
+        launch_arguments={'use_imu_fusion': 'false'}.items(),
+    )
+
     lidar_node = Node(
         package='unitree_lidar_ros2',
         executable='unitree_lidar_ros2_node',
@@ -81,7 +107,9 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        tf_base_link,
         lidar_node,
         pointcloud_to_laserscan_node,
+        localization,
         octomap_node,
     ])
