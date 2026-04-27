@@ -34,12 +34,12 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='lidar_to_camera_tf',
         arguments=[
-            '0.20',  # X: 20cm forward
-            '0.0',   # Y: centered
-            '-0.10', # Z: 10cm below the top-mounted lidar
-            '0.0',   # Yaw: facing straight ahead
-            '0.26',  # Pitch: ~15 degrees downward (Positive pitch in ROS is tilting DOWN)
-            '0.0',   # Roll: no tilt
+            '0.30',    # X: 30cm forward
+            '0.0',     # Y: centered
+            '0.0',     # Z: same flat surface (adjust if frame origins differ in height)
+            '0.0',     # Yaw: facing same direction as lidar
+            '-0.2618', # Pitch: -15° (nose down; standard ROS: negative pitch = downward)
+            '0.0',     # Roll: no tilt
             'unilidar_lidar',
             'camera_link'
         ]
@@ -76,7 +76,7 @@ def generate_launch_description():
             {'use_system_timestamp': True},
             {'range_min': 0.0},
             {'range_max': 100.0},
-            {'cloud_scan_num': 10},
+            {'cloud_scan_num': 18},
             {'serial_port': '/dev/ttyACM0'},
             {'baudrate': 4000000},
             {'lidar_port': 6101},
