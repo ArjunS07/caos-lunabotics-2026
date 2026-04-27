@@ -1,0 +1,8 @@
+crater_detector_node:
+  ros__parameters:
+    depth_drop_threshold: 0.15      # metres below ground plane to count as crater interior
+    min_crater_radius_m: 0.10       # ~20 cm min diameter (rulebook: craters up to 40-50 cm)
+    max_crater_radius_m: 0.25       # ~50 cm max diameter per rulebook
+    processing_rate: 5.0            # Hz
+    depth_avg_frames: 3             # temporal average window
+    output_frame: odom

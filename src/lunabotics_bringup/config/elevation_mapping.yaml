@@ -1,0 +1,16 @@
+elevation_mapping:
+  ros__parameters:
+    point_cloud_topic: /unilidar/cloud    # full range — terrain height data, not clipped
+    robot_pose_topic: /odometry/filtered
+    track_point_frame_id: base_link
+    robot_base_frame_id: base_link
+    map_frame_id: odom
+    sensor_frame_id: unilidar_lidar
+    length_in_x: 8.0              # metres — covers 6.88 m arena length with margin
+    length_in_y: 6.0              # metres — covers 5.0 m arena width with margin
+    resolution: 0.05              # 5 cm cells
+    min_update_rate: 2.0          # Hz
+    sensor_processor/type: laser_scan
+    sensor_processor/min_distance: 0.5
+    sensor_processor/max_distance: 10.0
+    layers: [elevation, variance]

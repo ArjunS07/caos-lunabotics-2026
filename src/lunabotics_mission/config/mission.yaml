@@ -1,0 +1,7 @@
+mission_node:
+  ros__parameters:
+    construction_zone_x: 5.5       # metres from odom origin — approx centre of Construction Zone
+    construction_zone_y: 1.25      # offset toward berm wall; tune per venue (KSC vs UCF)
+    obstacle_zone_distance: 2.5    # distance threshold: past this = entered Obstacle Zone
+    arrival_distance: 5.0          # expected distance when robot reaches Construction Zone
+    nav2_goal_timeout_s: 120.0     # max seconds before retrying Nav2 goal

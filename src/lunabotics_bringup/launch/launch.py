@@ -1,11 +1,6 @@
 """
 All-in-one launch file for single-machine development.
-Starts: RealSense D435i, Unitree LiDAR L2, TF, pointcloud_to_laserscan,
-        octomap_server, and RViz.
-
-CHANGELOG
-Arjun 10 apr
-- Added transformation in section 3 to map depth camera to lidar coordinates
+Same as launch_jetson.py but also starts RViz.
 """
 
 import os
@@ -18,52 +13,23 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    tf_base_link = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('lunabotics_bringup'),
-                'launch',
-                'tf_base_link.launch.py',
-            ),
-        ]),
-    )
+    bringup_dir = get_package_share_directory('lunabotics_bringup')
 
-    localization = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('lunabotics_localization'),
-                'launch',
-                'localization.launch.py',
-            ),
-        ]),
-        launch_arguments={'use_imu_fusion': 'true'}.items(),
-    )
+    # ── Sensors ──────────────────────────────────────────────────────────────
 
-    depth_scan = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('lunabotics_localization'),
-                'launch',
-                'depth_scan.launch.py',
-            ),
-        ]),
-    )
-
-    # 1. RealSense Driver
-    # Pulls in the official launch logic for the D435i
     realsense_node = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            os.path.join(get_package_share_directory('realsense2_camera'), 'launch', 'rs_launch.py')
+            os.path.join(get_package_share_directory('realsense2_camera'),
+                         'launch', 'rs_launch.py')
         ]),
         launch_arguments={
-            'pointcloud.enable': 'true',          # Required for 3D data
-            'depth_module.profile': '640x480x30', # Optimized for Orin Nano
-            'ordered_pc': 'true'
-        }.items()
+            'pointcloud.enable': 'true',
+            'depth_module.profile': '640x480x30',
+            'ordered_pc': 'true',
+        }.items(),
     )
 
-    # 2. Unitree Lidar node
-    node1 = Node(
+    lidar_node = Node(
         package='unitree_lidar_ros2',
         executable='unitree_lidar_ros2_node',
         name='unitree_lidar_ros2_node',
@@ -81,96 +47,100 @@ def generate_launch_description():
             {'lidar_ip': '192.168.1.62'},
             {'local_port': 6201},
             {'local_ip': '192.168.1.2'},
-            {'cloud_frame': "unilidar_lidar"},
-            {'cloud_topic': "unilidar/cloud"},
-            {'imu_frame': "unilidar_imu"},
-            {'imu_topic': "unilidar/imu"},
-        ]
+            {'cloud_frame': 'unilidar_lidar'},
+            {'cloud_topic': 'unilidar/cloud'},
+            {'imu_frame': 'unilidar_imu'},
+            {'imu_topic': 'unilidar/imu'},
+        ],
     )
 
-    # 3. Static Transform: Lidar → Camera
-    # Physical setup: both sensors on the same flat surface; camera 30cm forward along X.
-    # Camera tilted 15° downward. Standard ROS convention: negative pitch = nose down.
-    # Z=0.0 assumes frame origins are at the same height — adjust if the LiDAR spin-head
-    # height differs from the camera optical-center height.
-    static_tf = Node(
+    # ── TF tree ───────────────────────────────────────────────────────────────
+
+    tf_base_link = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(bringup_dir, 'launch', 'tf_base_link.launch.py'),
+        ]),
+    )
+
+    static_tf_lidar_camera = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='lidar_to_camera_tf',
         arguments=[
-            '0.30',    # X: 30cm forward
-            '0.0',     # Y: centered
-            '0.0',     # Z: same flat surface (adjust if frame origins differ in height)
-            '0.0',     # Yaw: facing same direction as lidar
-            '-0.2618', # Pitch: -15° (nose down; standard ROS: negative pitch = downward)
-            '0.0',     # Roll: no tilt
-            'unilidar_lidar',
-            'camera_link'
-        ]
-    )
-
-    # 4. Convert PointCloud2 → LaserScan
-    pointcloud_to_laserscan_node = Node(
-        package='pointcloud_to_laserscan',
-        executable='pointcloud_to_laserscan_node',
-        name='pointcloud_to_laserscan',
-        parameters=[{
-            'target_frame': 'unilidar_lidar',
-            'min_height': -0.1,
-            'max_height': 1.5,
-            'angle_min': -3.14159,
-            'angle_max': 3.14159,
-            'range_min': 0.1,
-            'range_max': 50.0,
-            'use_inf': True,
-        }],
-        remappings=[
-            ('cloud_in', '/unilidar/cloud'),
-            ('scan', '/scan'),
+            '0.30', '0.0', '0.0',
+            '0.0', '-0.2618', '0.0',
+            'unilidar_lidar', 'camera_link',
         ],
     )
 
-    # 5. Octomap Server
-    octomap_node = Node(
-        package='octomap_server',
-        executable='octomap_server_node',
-        name='octomap_server',
-        parameters=[{
-            'resolution': 0.1,
-            'frame_id': 'unilidar_lidar',
-            'sensor_model/max_range': 5.0,
-            'occupancy_min_z': 0.05,
-            'occupancy_max_z': 0.5,
-            'filter_speckles': True,
-            'filter_ground': False,
-            'sensor_model/hit': 0.9,
-            'sensor_model/miss': 0.2,
-            'sensor_model/min': 0.12,
-            'sensor_model/max': 0.97,
-        }],
-        remappings=[('cloud_in', '/unilidar/cloud')]
+    # ── Localization (ICP) ───────────────────────────────────────────────────
+
+    icp_localization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_icp_localization'),
+                'launch', 'icp_localization.launch.py'),
+        ]),
     )
 
-    # 6. RViz
-    rviz_config_file = os.path.join(
-        get_package_share_directory('lunabotics_bringup'), 'rviz', 'view.rviz'
+    # ── Terrain mapping ───────────────────────────────────────────────────────
+
+    elevation_mapping_node = Node(
+        package='elevation_mapping',
+        executable='elevation_mapping_node',
+        name='elevation_mapping',
+        output='screen',
+        parameters=[os.path.join(bringup_dir, 'config', 'elevation_mapping.yaml')],
     )
+
+    # ── Crater detection ──────────────────────────────────────────────────────
+
+    crater_detection = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_detection'),
+                'launch', 'crater_detection.launch.py'),
+        ]),
+    )
+
+    # ── Navigation (Nav2) ─────────────────────────────────────────────────────
+
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(bringup_dir, 'launch', 'navigation.launch.py'),
+        ]),
+    )
+
+    # ── Mission FSM ───────────────────────────────────────────────────────────
+
+    mission = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            os.path.join(
+                get_package_share_directory('lunabotics_mission'),
+                'launch', 'mission.launch.py'),
+        ]),
+    )
+
+    # ── RViz ─────────────────────────────────────────────────────────────────
+
+    rviz_config_file = os.path.join(bringup_dir, 'rviz', 'view.rviz')
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         arguments=['-d', rviz_config_file],
-        output='log'
+        output='log',
     )
 
     return LaunchDescription([
-        tf_base_link,
         realsense_node,
-        node1,
-        static_tf,
-        pointcloud_to_laserscan_node,
-        localization,
-        depth_scan,
-        octomap_node,
+        lidar_node,
+        tf_base_link,
+        static_tf_lidar_camera,
+        icp_localization,
+        elevation_mapping_node,
+        crater_detection,
+        navigation,
+        mission,
         rviz_node,
     ])
