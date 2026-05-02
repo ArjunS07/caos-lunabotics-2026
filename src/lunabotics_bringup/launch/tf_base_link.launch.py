@@ -33,14 +33,14 @@ def generate_launch_description():
         executable='static_transform_publisher',
         name='base_link_to_unilidar_tf',
         arguments=[
-            LaunchConfiguration('base_to_lidar_x'),
-            LaunchConfiguration('base_to_lidar_y'),
-            LaunchConfiguration('base_to_lidar_z'),
-            LaunchConfiguration('base_to_lidar_yaw'),
-            LaunchConfiguration('base_to_lidar_pitch'),
-            LaunchConfiguration('base_to_lidar_roll'),
-            'base_link',
-            'unilidar_lidar',
+            '--x', LaunchConfiguration('base_to_lidar_x'),
+            '--y', LaunchConfiguration('base_to_lidar_y'),
+            '--z', LaunchConfiguration('base_to_lidar_z'),
+            '--yaw',   LaunchConfiguration('base_to_lidar_yaw'),
+            '--pitch', LaunchConfiguration('base_to_lidar_pitch'),
+            '--roll',  LaunchConfiguration('base_to_lidar_roll'),
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'unilidar_lidar',
         ],
     )
 
