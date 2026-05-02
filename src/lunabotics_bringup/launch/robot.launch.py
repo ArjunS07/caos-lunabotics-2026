@@ -1,6 +1,12 @@
 """
-All-in-one launch file for single-machine development.
-Same as launch_jetson.py but also starts RViz.
+Robot-side launch file (Jetson Orin Nano).
+Runs all hardware drivers, TF, localization, terrain mapping, crater detection,
+and Nav2. Does NOT start the Mission FSM or RViz — run those on the laptop
+via laptop.launch.py.
+
+Prerequisites on Jetson:
+  export ROS_DOMAIN_ID=42
+  export ROS_LOCALHOST_ONLY=0
 """
 
 import os
@@ -24,8 +30,8 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'pointcloud.enable': 'true',
-            'depth_module.depth_profile': '640x480x30',
-            'pointcloud.ordered_pc': 'true',
+            'depth_module.profile': '640x480x30',
+            'ordered_pc': 'true',
         }.items(),
     )
 
@@ -62,18 +68,25 @@ def generate_launch_description():
         ]),
     )
 
+    # Camera is 30 cm forward of LiDAR, tilted 15° downward
     static_tf_lidar_camera = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='lidar_to_camera_tf',
         arguments=[
-            '0.30', '0.0', '0.0',
-            '0.0', '-0.2618', '0.0',
-            'unilidar_lidar', 'camera_link',
+            '0.30',    # X: 30 cm forward
+            '0.0',     # Y: centred
+            '0.0',     # Z: same height
+            '0.0',     # Yaw
+            '-0.2618', # Pitch: -15°
+            '0.0',     # Roll
+            'unilidar_lidar',
+            'camera_link',
         ],
     )
 
     # ── Localization (ICP) ───────────────────────────────────────────────────
+    # Must run on-robot: tight latency loop at LiDAR scan rate.
 
     icp_localization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -84,6 +97,8 @@ def generate_launch_description():
     )
 
     # ── Crater detection ──────────────────────────────────────────────────────
+    # Must run on-robot: consumes raw depth frames at 30 fps (~18 MB/s) from
+    # the RealSense — far too much bandwidth to forward over WiFi.
 
     crater_detection = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -94,6 +109,8 @@ def generate_launch_description():
     )
 
     # ── Navigation (Nav2) ─────────────────────────────────────────────────────
+    # Must run on-robot: the controller loop sends cmd_vel; any WiFi dropout
+    # would interrupt motor commands.
 
     navigation = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
@@ -101,35 +118,17 @@ def generate_launch_description():
         ]),
     )
 
-    # ── Mission FSM ───────────────────────────────────────────────────────────
-
-    mission = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([
-            os.path.join(
-                get_package_share_directory('lunabotics_mission'),
-                'launch', 'mission.launch.py'),
-        ]),
-    )
-
-    # ── RViz ─────────────────────────────────────────────────────────────────
-
-    rviz_config_file = os.path.join(bringup_dir, 'rviz', 'view.rviz')
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        arguments=['-d', rviz_config_file],
-        output='log',
-    )
-
     return LaunchDescription([
+        # Sensors first
         realsense_node,
         lidar_node,
+        # TF
         tf_base_link,
         static_tf_lidar_camera,
+        # Localization
         icp_localization,
+        # Detection
         crater_detection,
+        # Navigation
         navigation,
-        mission,
-        rviz_node,
     ])

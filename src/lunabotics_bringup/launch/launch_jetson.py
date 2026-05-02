@@ -32,8 +32,8 @@ def generate_launch_description():
         ]),
         launch_arguments={
             'pointcloud.enable': 'true',
-            'depth_module.profile': '640x480x30',
-            'ordered_pc': 'true',
+            'depth_module.depth_profile': '640x480x30',
+            'pointcloud.ordered_pc': 'true',
         }.items(),
     )
 
@@ -98,16 +98,6 @@ def generate_launch_description():
         ]),
     )
 
-    # ── Terrain mapping ───────────────────────────────────────────────────────
-
-    elevation_mapping_node = Node(
-        package='elevation_mapping',
-        executable='elevation_mapping_node',
-        name='elevation_mapping',
-        output='screen',
-        parameters=[os.path.join(bringup_dir, 'config', 'elevation_mapping.yaml')],
-    )
-
     # ── Crater detection ──────────────────────────────────────────────────────
 
     crater_detection = IncludeLaunchDescription(
@@ -145,8 +135,7 @@ def generate_launch_description():
         static_tf_lidar_camera,
         # Localization
         icp_localization,
-        # Terrain + detection
-        elevation_mapping_node,
+        # Detection
         crater_detection,
         # Navigation
         navigation,

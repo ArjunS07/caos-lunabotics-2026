@@ -23,9 +23,6 @@
   <!-- Localization -->
   <exec_depend>lunabotics_icp_localization</exec_depend>
 
-  <!-- Terrain mapping -->
-  <exec_depend>elevation_mapping</exec_depend>
-
   <!-- Detection -->
   <exec_depend>lunabotics_detection</exec_depend>
 
