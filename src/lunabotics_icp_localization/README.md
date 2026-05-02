@@ -7,6 +7,13 @@ Publishes:
 - `/odometry/filtered` (`nav_msgs/Odometry`) — pose in the `odom` frame
 - `odom → base_link` TF — consumed by Nav2, elevation_mapping, crater detection
 
+> **TF timestamp note:** The TF transform is stamped with `this->now()` (wall-clock time at
+> publication), not the LiDAR scan's header timestamp. This avoids a race with Nav2's
+> message filter: if the TF were stamped at scan time, the costmap could receive the cloud
+> before GICP finishes and see "timestamp earlier than all data in transform cache." The
+> Nav2 costmaps are configured with `transform_tolerance: 0.5` to absorb the ≤GICP-cycle
+> offset between TF stamp and scan stamp.
+
 ---
 
 ## How It Works

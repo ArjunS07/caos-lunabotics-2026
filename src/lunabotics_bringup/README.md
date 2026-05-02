@@ -75,6 +75,9 @@ Configures the full Nav2 stack. Key tuning values:
 | `robot_radius` | 0.40 m | Update to actual footprint |
 | `xy_goal_tolerance` | 0.50 m | 50 cm arrival window |
 | `allow_unknown` | true | No prior map — costmap starts empty |
+| `transform_tolerance` | 0.5 s | Both costmaps; absorbs GICP processing delay vs scan timestamp |
+| global costmap `origin_x/y` | -0.5, -3.5 m | Robot starts 0.5 m inside left edge, centred laterally |
+| global costmap `width × height` | 10 × 7 m | Covers 6.88 m arena with ~1.5 m margins |
 
 Obstacle layers in both global and local costmaps:
 - `crater_layer` — subscribes to `/crater_cloud` (PointCloud2) from `lunabotics_detection`
@@ -96,11 +99,15 @@ To add the elevation layer back to the Nav2 costmap, uncomment the `elevation_la
 
 ```
 odom
- └── base_link          ← published by lunabotics_icp_localization at LiDAR rate
+ └── base_link          ← published by lunabotics_icp_localization at LiDAR rate (stamped now())
       └── unilidar_lidar  ← static (tf_base_link.launch.py)
            └── camera_link  ← static (30 cm forward, -15° pitch)
                 └── camera_depth_optical_frame  ← published by realsense2_camera
 ```
+
+The `odom → base_link` transform is stamped with wall-clock time (`this->now()`) rather than the
+LiDAR scan's header timestamp. Both costmaps set `transform_tolerance: 0.5` to absorb the small
+offset between the TF stamp and any sensor message that uses the scan's original timestamp.
 
 ---
 

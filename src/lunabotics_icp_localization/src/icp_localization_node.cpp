@@ -155,7 +155,7 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
     submap_seeded_ = true;
     imu_delta_ = Eigen::Isometry3d::Identity();
     imu_velocity_ = Eigen::Vector3d::Zero();
-    publishPose(stamp);
+    publishPose(this->now());
     return;
   }
 
@@ -197,7 +197,7 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
   imu_delta_ = Eigen::Isometry3d::Identity();
   imu_velocity_ = Eigen::Vector3d::Zero();
 
-  publishPose(stamp);
+  publishPose(this->now());
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr IcpLocalizationNode::buildSubmap()
