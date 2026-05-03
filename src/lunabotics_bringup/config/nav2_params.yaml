@@ -128,7 +128,7 @@ global_costmap:
       height: 7                    # metres — 5.0 m arena + 1 m margins each side
       origin_x: -0.5               # robot starts 0.5 m inside left edge of costmap
       origin_y: -3.5               # centred laterally on ICP odom origin
-      transform_tolerance: 0.5     # tolerate up to 500 ms between TF stamp and scan stamp
+      transform_tolerance: 1.0     # 1 s: covers GICP latency on Jetson before dropping scan
       track_unknown_space: true
       rolling_window: false
       plugins: [crater_layer, obstacle_layer, inflation_layer]
@@ -179,7 +179,7 @@ local_costmap:
       height: 5
       resolution: 0.05
       robot_radius: 0.40
-      transform_tolerance: 0.5     # tolerate up to 500 ms between TF stamp and scan stamp
+      transform_tolerance: 1.0     # 1 s: covers GICP latency on Jetson before dropping scan
       plugins: [crater_layer, obstacle_layer, inflation_layer]
 
       crater_layer:

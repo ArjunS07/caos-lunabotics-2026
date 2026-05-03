@@ -25,8 +25,8 @@ def generate_launch_description():
             'base_to_lidar_yaw', default_value='0.0',
             description='Yaw (rad), Euler ZYX after translation'),
         DeclareLaunchArgument(
-            'base_to_lidar_pitch', default_value='-0.663225',
-            description='Pitch (rad); -38° forward/down from horizontal'),
+            'base_to_lidar_pitch', default_value='0.0',
+            description='Pitch (rad); 0° forward/down from horizontal'),
         DeclareLaunchArgument(
             'base_to_lidar_roll', default_value='0.0',
             description='Roll (rad)'),

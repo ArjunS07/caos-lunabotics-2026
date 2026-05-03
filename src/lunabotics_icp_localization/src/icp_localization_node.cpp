@@ -46,6 +46,9 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
   odom_pub_ = create_publisher<nav_msgs::msg::Odometry>("odometry/filtered", 10);
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
+  // Start background GICP worker thread
+  gicp_thread_ = std::thread(&IcpLocalizationNode::gicpWorker, this);
+
   // Subscriptions
   cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     "unilidar/cloud", 10,
@@ -57,6 +60,18 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
 
   RCLCPP_INFO(get_logger(), "ICP localization started (range_clip=%.1f m, submap=%d scans)",
     icp_range_clip_, submap_size_);
+}
+
+IcpLocalizationNode::~IcpLocalizationNode()
+{
+  {
+    std::lock_guard<std::mutex> lock(gicp_queue_mutex_);
+    gicp_running_ = false;
+  }
+  gicp_queue_cv_.notify_one();
+  if (gicp_thread_.joinable()) {
+    gicp_thread_.join();
+  }
 }
 
 void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
@@ -87,22 +102,21 @@ void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg
     delta_rot = Eigen::AngleAxisd(angle, omega.normalized());
   }
 
+  std::lock_guard<std::mutex> lock(pose_mutex_);
+
   // Linear accel in world frame (remove gravity: world z-up, ~9.81 m/s²)
   Eigen::Vector3d accel_body(
     msg->linear_acceleration.x,
     msg->linear_acceleration.y,
     msg->linear_acceleration.z);
 
-  // Rotate accel to world frame using current accumulated rotation
   const Eigen::Matrix3d R_world = (current_pose_ * imu_delta_).linear();
   Eigen::Vector3d accel_world = R_world * accel_body;
-  accel_world.z() -= 9.81;  // subtract gravity
+  accel_world.z() -= 9.81;
 
-  // Integrate velocity and position
   const Eigen::Vector3d delta_pos = imu_velocity_ * dt + 0.5 * accel_world * dt * dt;
   imu_velocity_ += accel_world * dt;
 
-  // Accumulate delta transform
   Eigen::Isometry3d delta_step = Eigen::Isometry3d::Identity();
   delta_step.linear() = delta_rot.toRotationMatrix();
   delta_step.translation() = delta_pos;
@@ -115,11 +129,10 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
   pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::fromROSMsg(*msg, *raw);
 
-  // Remove NaN points
   std::vector<int> indices;
   pcl::removeNaNFromPointCloud(*raw, *raw, indices);
 
-  // Range clip: exclude points beyond icp_range_clip_ to avoid wall returns
+  // Range clip
   pcl::PointCloud<pcl::PointXYZ>::Ptr clipped(new pcl::PointCloud<pcl::PointXYZ>);
   clipped->reserve(raw->size());
   const float clip_sq = static_cast<float>(icp_range_clip_ * icp_range_clip_);
@@ -135,7 +148,7 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
     return;
   }
 
-  // Voxelise current scan
+  // Voxelise
   pcl::PointCloud<pcl::PointXYZ>::Ptr current_scan(new pcl::PointCloud<pcl::PointXYZ>);
   {
     pcl::VoxelGrid<pcl::PointXYZ> vg;
@@ -149,55 +162,98 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
 
   const rclcpp::Time stamp = msg->header.stamp;
 
-  if (!submap_seeded_) {
-    // First scan: initialise submap at identity
-    submap_scans_world_.push_back(current_scan);  // already at world origin
-    submap_seeded_ = true;
-    imu_delta_ = Eigen::Isometry3d::Identity();
-    imu_velocity_ = Eigen::Vector3d::Zero();
-    publishPose(stamp);
-    return;
+  // Publish IMU-predicted TF immediately so Nav2's message filter doesn't
+  // wait for GICP. GICP runs in a background thread and takes > 1 s on the
+  // Jetson; without this every scan would be dropped before TF is available.
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex_);
+    publishPose(stamp, current_pose_ * imu_delta_);
   }
 
-  // Build merged submap in world frame
-  pcl::PointCloud<pcl::PointXYZ>::Ptr submap = buildSubmap();
-
-  // Initial guess from IMU delta
-  const Eigen::Isometry3d initial_guess = current_pose_ * imu_delta_;
-  const Eigen::Matrix4f hint = initial_guess.matrix().cast<float>();
-
-  // GICP: align current scan (lidar frame) against submap (world frame)
-  // We need current scan in world frame for the target; we pass the hint.
-  gicp_.setInputSource(current_scan);
-  gicp_.setInputTarget(submap);
-
-  pcl::PointCloud<pcl::PointXYZ> aligned;
-  gicp_.align(aligned, hint);
-
-  if (gicp_.hasConverged() && gicp_.getFitnessScore() < fitness_threshold_) {
-    const Eigen::Matrix4d result = gicp_.getFinalTransformation().cast<double>();
-    current_pose_ = Eigen::Isometry3d(result);
-  } else {
-    RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
-      "GICP did not converge (fitness=%.3f) — falling back to IMU",
-      gicp_.getFitnessScore());
-    current_pose_ = initial_guess;
+  // Queue for background GICP (keep only the latest scan — always work on
+  // the most current geometry rather than a stale backlog).
+  {
+    std::lock_guard<std::mutex> lock(gicp_queue_mutex_);
+    gicp_jobs_.clear();
+    gicp_jobs_.push_back({stamp, current_scan});
   }
+  gicp_queue_cv_.notify_one();
+}
 
-  // Transform current scan to world frame and add to submap
-  pcl::PointCloud<pcl::PointXYZ>::Ptr scan_world(new pcl::PointCloud<pcl::PointXYZ>);
-  pcl::transformPointCloud(*current_scan, *scan_world, current_pose_.matrix().cast<float>());
-  submap_scans_world_.push_back(scan_world);
+void IcpLocalizationNode::gicpWorker()
+{
+  while (true) {
+    GicpJob job;
+    {
+      std::unique_lock<std::mutex> lock(gicp_queue_mutex_);
+      gicp_queue_cv_.wait(lock, [this] {
+        return !gicp_jobs_.empty() || !gicp_running_;
+      });
+      if (!gicp_running_ && gicp_jobs_.empty()) {
+        return;
+      }
+      job = std::move(gicp_jobs_.front());
+      gicp_jobs_.pop_front();
+    }
 
-  if (static_cast<int>(submap_scans_world_.size()) > submap_size_) {
-    submap_scans_world_.pop_front();
+    // First scan: seed the submap and reset IMU integration — no GICP yet.
+    if (!submap_seeded_) {
+      submap_scans_world_.push_back(job.scan);
+      submap_seeded_ = true;
+      {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        imu_delta_ = Eigen::Isometry3d::Identity();
+        imu_velocity_ = Eigen::Vector3d::Zero();
+      }
+      continue;
+    }
+
+    // Snapshot pose under mutex before the slow GICP call
+    Eigen::Isometry3d initial_guess;
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      initial_guess = current_pose_ * imu_delta_;
+    }
+
+    // GICP — slow (~1 s on Jetson), no mutex held
+    auto submap = buildSubmap();
+    gicp_.setInputSource(job.scan);
+    gicp_.setInputTarget(submap);
+
+    pcl::PointCloud<pcl::PointXYZ> aligned;
+    gicp_.align(aligned, initial_guess.matrix().cast<float>());
+
+    Eigen::Isometry3d new_pose;
+    if (gicp_.hasConverged() && gicp_.getFitnessScore() < fitness_threshold_) {
+      new_pose = Eigen::Isometry3d(gicp_.getFinalTransformation().cast<double>());
+    } else {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+        "GICP did not converge (fitness=%.3f) — falling back to IMU",
+        gicp_.getFitnessScore());
+      new_pose = initial_guess;
+    }
+
+    // Write corrected pose and reset IMU integration under mutex
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      current_pose_ = new_pose;
+      imu_delta_ = Eigen::Isometry3d::Identity();
+      imu_velocity_ = Eigen::Vector3d::Zero();
+    }
+
+    // Update submap (GICP worker thread only after seeding — no mutex needed)
+    pcl::PointCloud<pcl::PointXYZ>::Ptr scan_world(new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::transformPointCloud(*job.scan, *scan_world, new_pose.matrix().cast<float>());
+    submap_scans_world_.push_back(scan_world);
+    if (static_cast<int>(submap_scans_world_.size()) > submap_size_) {
+      submap_scans_world_.pop_front();
+    }
+
+    // Publish GICP-corrected TF at stamp+1 ns (distinct from the IMU prediction
+    // at stamp published in cloudCallback, to avoid a duplicate-timestamp entry
+    // in the tf2 buffer which would cause undefined interpolation).
+    publishPose(job.stamp + rclcpp::Duration(0, 1), new_pose);
   }
-
-  // Reset IMU delta now that we have a new cloud-derived pose
-  imu_delta_ = Eigen::Isometry3d::Identity();
-  imu_velocity_ = Eigen::Vector3d::Zero();
-
-  publishPose(stamp);
 }
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr IcpLocalizationNode::buildSubmap()
@@ -207,7 +263,6 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr IcpLocalizationNode::buildSubmap()
     *merged += *scan;
   }
 
-  // Re-voxelise merged submap at slightly coarser resolution for speed
   pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::VoxelGrid<pcl::PointXYZ> vg;
   vg.setInputCloud(merged);
@@ -216,17 +271,15 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr IcpLocalizationNode::buildSubmap()
   return downsampled;
 }
 
-void IcpLocalizationNode::publishPose(const rclcpp::Time & stamp)
+void IcpLocalizationNode::publishPose(const rclcpp::Time & stamp, const Eigen::Isometry3d & pose)
 {
-  const Eigen::Quaterniond q(current_pose_.linear());
-  const Eigen::Vector3d    t = current_pose_.translation();
+  const Eigen::Quaterniond q(pose.linear());
+  const Eigen::Vector3d    t = pose.translation();
 
-  // Odometry message
   nav_msgs::msg::Odometry odom;
   odom.header.stamp    = stamp;
   odom.header.frame_id = odom_frame_;
   odom.child_frame_id  = base_frame_;
-
   odom.pose.pose.position.x    = t.x();
   odom.pose.pose.position.y    = t.y();
   odom.pose.pose.position.z    = t.z();
@@ -234,10 +287,8 @@ void IcpLocalizationNode::publishPose(const rclcpp::Time & stamp)
   odom.pose.pose.orientation.y = q.y();
   odom.pose.pose.orientation.z = q.z();
   odom.pose.pose.orientation.w = q.w();
-
   odom_pub_->publish(odom);
 
-  // TF: odom → base_link
   geometry_msgs::msg::TransformStamped tf;
   tf.header.stamp            = stamp;
   tf.header.frame_id         = odom_frame_;
@@ -249,7 +300,6 @@ void IcpLocalizationNode::publishPose(const rclcpp::Time & stamp)
   tf.transform.rotation.y    = q.y();
   tf.transform.rotation.z    = q.z();
   tf.transform.rotation.w    = q.w();
-
   tf_broadcaster_->sendTransform(tf);
 }
 

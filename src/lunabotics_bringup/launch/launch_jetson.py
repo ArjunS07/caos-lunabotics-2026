@@ -81,7 +81,7 @@ def generate_launch_description():
             '0.0',     # Y: centred
             '0.0',     # Z: same height
             '0.0',     # Yaw
-            '-0.2618', # Pitch: -15°
+            '0.0', # Pitch: -15°
             '0.0',     # Roll
             'unilidar_lidar',
             'camera_link',
