@@ -75,7 +75,7 @@ Configures the full Nav2 stack. Key tuning values:
 | `robot_radius` | 0.40 m | Update to actual footprint |
 | `xy_goal_tolerance` | 0.50 m | 50 cm arrival window |
 | `allow_unknown` | true | No prior map — costmap starts empty |
-| `transform_tolerance` | 0.5 s | Both costmaps; absorbs small TF/scan timing differences |
+| `transform_tolerance` | 1.0 s | Both costmaps; covers GICP latency on Jetson |
 | global costmap `origin_x/y` | -0.5, -3.5 m | Robot starts 0.5 m inside left edge, centred laterally |
 | global costmap `width × height` | 10 × 7 m | Covers 6.88 m arena with ~1.5 m margins |
 | `default_nav_to_pose_bt_xml` | `navigate_to_pose_w_replanning_and_recovery.xml` | Humble-compatible BT; `RemovePassedGoals` not available in Humble |
@@ -107,8 +107,9 @@ odom
                 └── camera_depth_optical_frame  ← published by realsense2_camera
 ```
 
-Both costmaps set `transform_tolerance: 0.5` to absorb small timing differences between the
-TF stamp and incoming sensor messages.
+Both costmaps set `transform_tolerance: 1.0` to cover GICP latency on the Jetson.  ICP
+publishes an IMU-predicted TF immediately at the scan timestamp so Nav2's message filter
+doesn't wait for GICP; the corrected TF follows at `stamp+1 ns` once GICP converges.
 
 ---
 

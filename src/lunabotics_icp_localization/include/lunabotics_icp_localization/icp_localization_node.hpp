@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <deque>
 #include <string>
 #include <mutex>
@@ -43,6 +44,10 @@ private:
   Eigen::Isometry3d imu_delta_;
   Eigen::Vector3d   imu_velocity_;
   std::mutex        pose_mutex_;
+
+  // Keep-alive: publishes identity TF at wall-clock time until first scan arrives
+  rclcpp::TimerBase::SharedPtr keepalive_timer_;
+  std::atomic<bool>            first_scan_received_{false};
 
   // IMU bookkeeping — executor thread only, no mutex needed
   rclcpp::Time last_imu_stamp_;

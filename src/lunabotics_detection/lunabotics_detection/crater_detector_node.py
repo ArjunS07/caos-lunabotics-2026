@@ -14,6 +14,7 @@ Pipeline per frame (5 Hz):
 """
 
 import collections
+import warnings
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
@@ -43,7 +44,7 @@ class CraterDetectorNode(Node):
         self.declare_parameter('max_crater_radius_m', 0.25)
         self.declare_parameter('processing_rate', 5.0)
         self.declare_parameter('depth_avg_frames', 3)
-        self.declare_parameter('output_frame', 'odom')
+        self.declare_parameter('output_frame', 'camera_depth_optical_frame')
 
         self.drop_thresh   = self.get_parameter('depth_drop_threshold').value
         self.min_r_m       = self.get_parameter('min_crater_radius_m').value
@@ -87,12 +88,24 @@ class CraterDetectorNode(Node):
         self.latest_depth_frame = msg.header.frame_id
 
     def _process(self):
-        if not self.cam_info_received or len(self.depth_deque) < 1:
+        print("PROCESS LOOP")
+        if not self.cam_info_received or len(self.depth_deque) < self.avg_frames:
             return
 
         # 1. Temporal average
         stack = np.stack(list(self.depth_deque), axis=0)
-        depth = np.nanmean(stack, axis=0)  # (H, W) float32 metres
+        # Check if there are any valid (non-NaN) values before averaging
+        if not np.any(np.isfinite(stack)):
+            return
+
+        valid_counts = np.sum(np.isfinite(stack), axis=0)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'Mean of empty slice')
+            depth = np.nanmean(stack, axis=0)
+
+        # Invalidate pixels that never had valid data
+        depth[valid_counts == 0] = np.nan
 
         H, W = depth.shape
         fx = self.cam_model.fx()

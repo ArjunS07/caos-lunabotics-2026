@@ -58,6 +58,24 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
     "unilidar/imu", 100,
     std::bind(&IcpLocalizationNode::imuCallback, this, std::placeholders::_1));
 
+  // Publish identity TF immediately so Nav2's tf2 buffer has data before the
+  // first scan.  Without this, the tf2 buffer is empty when Nav2 activates
+  // (VOLATILE QoS — no historical TF) and the first scans are dropped.
+  publishPose(this->now(), current_pose_);
+
+  // Keep publishing at wall-clock time every 100 ms until the first cloud
+  // arrives and ICP takes over.  The timer cancels itself on first scan.
+  keepalive_timer_ = create_wall_timer(
+    std::chrono::milliseconds(100),
+    [this]() {
+      if (first_scan_received_) {
+        keepalive_timer_->cancel();
+        return;
+      }
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      publishPose(this->now(), current_pose_);
+    });
+
   RCLCPP_INFO(get_logger(), "ICP localization started (range_clip=%.1f m, submap=%d scans)",
     icp_range_clip_, submap_size_);
 }
@@ -104,27 +122,19 @@ void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg
 
   std::lock_guard<std::mutex> lock(pose_mutex_);
 
-  // Linear accel in world frame (remove gravity: world z-up, ~9.81 m/s²)
-  Eigen::Vector3d accel_body(
-    msg->linear_acceleration.x,
-    msg->linear_acceleration.y,
-    msg->linear_acceleration.z);
-
-  const Eigen::Matrix3d R_world = (current_pose_ * imu_delta_).linear();
-  Eigen::Vector3d accel_world = R_world * accel_body;
-  accel_world.z() -= 9.81;
-
-  const Eigen::Vector3d delta_pos = imu_velocity_ * dt + 0.5 * accel_world * dt * dt;
-  imu_velocity_ += accel_world * dt;
-
+  // Only integrate rotation from IMU.  Linear-acceleration double-integration
+  // drifts unboundedly (gravity leaks into X/Y when the mount is not perfectly
+  // level, causing the estimated position to fly outside the costmap bounds
+  // within seconds if GICP isn't correcting).  Position comes from GICP alone.
   Eigen::Isometry3d delta_step = Eigen::Isometry3d::Identity();
   delta_step.linear() = delta_rot.toRotationMatrix();
-  delta_step.translation() = delta_pos;
   imu_delta_ = imu_delta_ * delta_step;
 }
 
 void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
+  first_scan_received_ = true;
+
   // Convert to PCL
   pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::fromROSMsg(*msg, *raw);
