@@ -42,7 +42,6 @@ private:
   // Pose state — shared between executor thread and GICP worker, protected by pose_mutex_
   Eigen::Isometry3d current_pose_;
   Eigen::Isometry3d imu_delta_;
-  Eigen::Vector3d   imu_velocity_;
   std::mutex        pose_mutex_;
 
   // Keep-alive: publishes identity TF at wall-clock time until first scan arrives

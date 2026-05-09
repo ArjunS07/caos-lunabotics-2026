@@ -12,16 +12,15 @@ namespace lunabotics_icp_localization
 IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
 : Node("icp_localization_node", options),
   current_pose_(Eigen::Isometry3d::Identity()),
-  imu_delta_(Eigen::Isometry3d::Identity()),
-  imu_velocity_(Eigen::Vector3d::Zero())
+  imu_delta_(Eigen::Isometry3d::Identity())
 {
   // Declare and get parameters
-  declare_parameter("voxel_leaf_size", 0.05);
-  declare_parameter("icp_range_clip", 3.0);
+  declare_parameter("voxel_leaf_size", 0.05); // merge all points within each 5 cm cube into one centroid
+  declare_parameter("icp_range_clip", 3.0); // discard points more than 3 m away
   declare_parameter("max_iterations", 15);
-  declare_parameter("max_correspondence_distance", 1.0);
-  declare_parameter("fitness_threshold", 0.8);
-  declare_parameter("submap_size", 8);
+  declare_parameter("max_correspondence_distance", 1.0); // ICP correspondence radisu
+  declare_parameter("fitness_threshold", 0.8); // reject ICP results with fitness score above this (higher is worse)
+  declare_parameter("submap_size", 8); // keep the last 8 scans merge into reference map
   declare_parameter("odom_frame", std::string("odom"));
   declare_parameter("base_frame", std::string("base_link"));
   declare_parameter("lidar_frame", std::string("unilidar_lidar"));
@@ -96,6 +95,7 @@ void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg
 {
   const rclcpp::Time stamp = msg->header.stamp;
 
+//need two messages to compute a delta, so use the first message to initialise the timestamp and return immediately without doing any integration.  This avoids large jumps on startup from an uninitialised timestamp or a long dt.
   if (!imu_initialised_) {
     last_imu_stamp_ = stamp;
     imu_initialised_ = true;
@@ -105,6 +105,7 @@ void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg
   const double dt = (stamp - last_imu_stamp_).seconds();
   last_imu_stamp_ = stamp;
 
+  // sanity check to avoid large jumps
   if (dt <= 0.0 || dt > 0.5) {
     return;
   }
@@ -213,15 +214,18 @@ void IcpLocalizationNode::gicpWorker()
       {
         std::lock_guard<std::mutex> lock(pose_mutex_);
         imu_delta_ = Eigen::Isometry3d::Identity();
-        imu_velocity_ = Eigen::Vector3d::Zero();
       }
       continue;
     }
 
-    // Snapshot pose under mutex before the slow GICP call
+    // Snapshot pose under mutex before the slow GICP call.
+    // Also capture imu_delta_ so we can preserve any rotation that accumulates
+    // *during* GICP (which takes ~1 s on the Jetson) rather than discarding it.
     Eigen::Isometry3d initial_guess;
+    Eigen::Isometry3d imu_delta_pre;
     {
       std::lock_guard<std::mutex> lock(pose_mutex_);
+      imu_delta_pre = imu_delta_;
       initial_guess = current_pose_ * imu_delta_;
     }
 
@@ -243,12 +247,12 @@ void IcpLocalizationNode::gicpWorker()
       new_pose = initial_guess;
     }
 
-    // Write corrected pose and reset IMU integration under mutex
+    // Write corrected pose. Preserve only the delta that accumulated *after* the
+    // snapshot — imu_delta_pre was already baked into initial_guess / new_pose.
     {
       std::lock_guard<std::mutex> lock(pose_mutex_);
       current_pose_ = new_pose;
-      imu_delta_ = Eigen::Isometry3d::Identity();
-      imu_velocity_ = Eigen::Vector3d::Zero();
+      imu_delta_ = imu_delta_pre.inverse() * imu_delta_;
     }
 
     // Update submap (GICP worker thread only after seeding — no mutex needed)
