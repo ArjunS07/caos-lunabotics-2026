@@ -11,7 +11,8 @@ Nav2 goal to the Construction Zone, monitors progress, and announces completion.
 ```
 IDLE ──(/autonomy_start service)──► TRAVERSING ──(Nav2 SUCCEEDED)──► ARRIVED
                                          │
-                                         └──(Nav2 FAILED or timeout)──► retry goal
+                                         ├──(Nav2 FAILED or timeout, retry ≤ MAX_RETRIES)──► resend goal
+                                         └──(Nav2 FAILED, retry > MAX_RETRIES)──► IDLE
 ```
 
 | State | What happens |
@@ -28,7 +29,9 @@ IDLE ──(/autonomy_start service)──► TRAVERSING ──(Nav2 SUCCEEDED)�
 ros2 service call /autonomy_start std_srvs/srv/Trigger
 ```
 
-Returns `success: True` if the node was in `IDLE` and Nav2 was reachable.
+Returns `success: True` if the node was in `IDLE` (state transitions immediately). The Nav2
+goal is sent asynchronously — if the action server is not yet available, an error is logged and
+the goal will be retried after `nav2_goal_timeout_s` seconds.
 
 **Operator procedure before calling this:**
 1. Place robot in the Excavation Zone

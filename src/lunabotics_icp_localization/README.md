@@ -13,7 +13,8 @@ Publishes:
 
 ```
 /unilidar/cloud ──► range clip (≤3 m) ──► VoxelGrid (5 cm) ──► GICP vs sliding submap
-/unilidar/imu   ──► integrate ω, a ─────────────────────────► initial guess for GICP
+/unilidar/imu   ──► integrate ω only ───────────────────────► initial guess for GICP
+                    (no acceleration — double-integration drifts unboundedly on lunar regolith)
                                                                      │
                                                                      ▼
                                                        current_pose_ (Eigen::Isometry3d)
@@ -24,8 +25,8 @@ Publishes:
 ```
 
 **Sliding submap:** The last N scans transformed into the world frame are merged and
-re-voxelised (7 cm) to form the GICP target. This avoids full SLAM while giving enough
-reference geometry for a 6.88 m arena traverse.
+re-voxelised (`submap_voxel_size`, default 7 cm) to form the GICP target. This avoids full
+SLAM while giving enough reference geometry for a 6.88 m arena traverse.
 
 **IMU fallback:** If GICP does not converge (fitness > threshold), the pose advances using
 the integrated IMU delta only.
@@ -63,9 +64,9 @@ Carry vendor documentation or a screenshot of the firmware setting to the inspec
 | `max_correspondence_distance` | 1.0 m | GICP correspondence threshold |
 | `fitness_threshold` | 0.8 | Score above which IMU fallback is used |
 | `submap_size` | 8 | Number of past scans in sliding submap |
+| `submap_voxel_size` | 0.07 m | Voxel leaf size for merged submap (slightly coarser than input scans) |
 | `odom_frame` | `odom` | |
 | `base_frame` | `base_link` | |
-| `lidar_frame` | `unilidar_lidar` | |
 
 ---
 

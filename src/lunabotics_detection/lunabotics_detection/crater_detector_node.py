@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PoseArray, Pose, Point
+from geometry_msgs.msg import PoseArray, Pose, Point, PointStamped
 from visualization_msgs.msg import MarkerArray, Marker
 from std_msgs.msg import ColorRGBA
 
@@ -44,7 +44,7 @@ class CraterDetectorNode(Node):
         self.declare_parameter('max_crater_radius_m', 0.25)
         self.declare_parameter('processing_rate', 5.0)
         self.declare_parameter('depth_avg_frames', 3)
-        self.declare_parameter('output_frame', 'camera_depth_optical_frame')
+        self.declare_parameter('output_frame', 'odom')
 
         self.drop_thresh   = self.get_parameter('depth_drop_threshold').value
         self.min_r_m       = self.get_parameter('min_crater_radius_m').value
@@ -58,6 +58,8 @@ class CraterDetectorNode(Node):
 
         self.depth_deque: collections.deque = collections.deque(maxlen=self.avg_frames)
         self.latest_depth: np.ndarray | None = None
+        self.latest_depth_stamp = None
+        self.latest_depth_frame = 'camera_depth_optical_frame'
         self.cam_info_received = False
 
         self.tf_buffer   = tf2_ros.Buffer()
@@ -88,7 +90,6 @@ class CraterDetectorNode(Node):
         self.latest_depth_frame = msg.header.frame_id
 
     def _process(self):
-        print("PROCESS LOOP")
         if not self.cam_info_received or len(self.depth_deque) < self.avg_frames:
             return
 
@@ -98,14 +99,9 @@ class CraterDetectorNode(Node):
         if not np.any(np.isfinite(stack)):
             return
 
-        valid_counts = np.sum(np.isfinite(stack), axis=0)
-
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', 'Mean of empty slice')
             depth = np.nanmean(stack, axis=0)
-
-        # Invalidate pixels that never had valid data
-        depth[valid_counts == 0] = np.nan
 
         H, W = depth.shape
         fx = self.cam_model.fx()
@@ -220,8 +216,8 @@ class CraterDetectorNode(Node):
                 detections_3d.append((X_c, Y_c, Z_c, r_m))
 
         # 9. Transform to odom frame
-        source_frame = getattr(self, 'latest_depth_frame', 'camera_depth_optical_frame')
-        stamp        = getattr(self, 'latest_depth_stamp', self.get_clock().now().to_msg())
+        source_frame = self.latest_depth_frame
+        stamp        = self.latest_depth_stamp
 
         try:
             tf = self.tf_buffer.lookup_transform(
@@ -270,23 +266,9 @@ class CraterDetectorNode(Node):
 
 
 def _transform_point(pt: Point, tf_stamped) -> Point:
-    t = tf_stamped.transform.translation
-    q = tf_stamped.transform.rotation
-
-    # Rotate point by quaternion (q * p * q^-1)
-    qx, qy, qz, qw = q.x, q.y, q.z, q.w
-    px, py, pz = pt.x, pt.y, pt.z
-
-    # Quaternion rotation: efficient formula
-    tx = 2.0 * (qy * pz - qz * py)
-    ty = 2.0 * (qz * px - qx * pz)
-    tz = 2.0 * (qx * py - qy * px)
-
-    rx = px + qw * tx + qy * tz - qz * ty
-    ry = py + qw * ty + qz * tx - qx * tz
-    rz = pz + qw * tz + qx * ty - qy * tx
-
-    return Point(x=rx + t.x, y=ry + t.y, z=rz + t.z)
+    ps = PointStamped()
+    ps.point = pt
+    return tf2_geometry_msgs.do_transform_point(ps, tf_stamped).point
 
 
 def main(args=None):

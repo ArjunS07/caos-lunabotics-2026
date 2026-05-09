@@ -77,9 +77,9 @@ private:
   double      max_correspondence_distance_;
   double      fitness_threshold_;
   int         submap_size_;
+  double      submap_voxel_size_;
   std::string odom_frame_;
   std::string base_frame_;
-  std::string lidar_frame_;
 
   void cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);

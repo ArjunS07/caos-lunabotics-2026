@@ -11,14 +11,14 @@ YAML configs that wire the rest of the stack together.
 lunabotics_bringup/
 ├── config/
 │   ├── nav2_params.yaml        # Full Nav2 stack config (planner, controller, costmaps)
-│   └── elevation_mapping.yaml  # ANYbotics elevation_mapping config
+│   └── elevation_mapping.yaml  # ANYbotics elevation_mapping config (optional terrain layer)
 ├── launch/
-│   ├── launch_jetson.py        # PRIMARY: Jetson competition launch (no RViz)
-│   ├── launch.py               # Dev: same as jetson + RViz
-│   ├── launch_local.py         # RViz-only, for a remote laptop
+│   ├── robot.launch.py         # PRIMARY (Jetson): hardware + processing, no Mission FSM or RViz
+│   ├── laptop.launch.py        # PRIMARY (laptop): Mission FSM + RViz only
+│   ├── launch_jetson.py        # Legacy all-in-one: full stack on one machine, no RViz
+│   ├── launch.py               # Dev: same as launch_jetson.py + RViz
 │   ├── navigation.launch.py    # Includes nav2_bringup with nav2_params.yaml
-│   ├── tf_base_link.launch.py  # Static TF: base_link → unilidar_lidar
-│   └── launch_bench_mvp.launch.py  # LiDAR-only bench test
+│   └── tf_base_link.launch.py  # Static TF: base_link → unilidar_lidar
 └── rviz/
     └── view.rviz               # RViz config
 ```
@@ -27,16 +27,23 @@ lunabotics_bringup/
 
 ## Launch Files
 
-### `launch_jetson.py` — Competition launch
+### Competition: split Jetson + laptop
 
-Starts the full autonomy stack on the Jetson. Does **not** start RViz.
+The preferred competition configuration splits the stack across two machines:
 
+**Jetson** — hardware, processing, and navigation:
 ```bash
-source install/setup.bash
-ros2 launch lunabotics_bringup launch_jetson.py
+export ROS_DOMAIN_ID=42 && export ROS_LOCALHOST_ONLY=0
+ros2 launch lunabotics_bringup robot.launch.py
 ```
 
-Nodes and includes, in startup order:
+**Operator laptop** — Mission FSM and RViz:
+```bash
+export ROS_DOMAIN_ID=42 && export ROS_LOCALHOST_ONLY=0
+ros2 launch lunabotics_bringup laptop.launch.py
+```
+
+`robot.launch.py` starts (in order):
 
 | Component | Package / Node |
 |-----------|---------------|
@@ -45,12 +52,22 @@ Nodes and includes, in startup order:
 | base_link → unilidar_lidar TF | `tf_base_link.launch.py` |
 | unilidar_lidar → camera_link TF | static_transform_publisher |
 | ICP localization | `lunabotics_icp_localization` |
-| Elevation mapping | `elevation_mapping` |
 | Crater detection | `lunabotics_detection` |
 | Nav2 (planner + controller + costmaps) | `navigation.launch.py` |
-| Mission FSM | `lunabotics_mission` |
 
-### `launch.py` — Development (single machine)
+`laptop.launch.py` starts:
+
+| Component | Package / Node |
+|-----------|---------------|
+| Mission FSM | `lunabotics_mission` |
+| RViz | `rviz2` |
+
+### `launch_jetson.py` — Legacy all-in-one
+
+Runs the full stack (including Mission FSM) on a single machine without RViz. Kept for bench
+testing when a second laptop is not available.
+
+### `launch.py` — Development (single machine with RViz)
 
 Same as `launch_jetson.py` plus `rviz2`.
 
@@ -75,7 +92,7 @@ Configures the full Nav2 stack. Key tuning values:
 | `robot_radius` | 0.40 m | Update to actual footprint |
 | `xy_goal_tolerance` | 0.50 m | 50 cm arrival window |
 | `allow_unknown` | true | No prior map — costmap starts empty |
-| `transform_tolerance` | 1.0 s | Both costmaps; covers GICP latency on Jetson |
+| `transform_tolerance` | 1.0 s | All Nav2 servers (costmaps, controller, behavior); covers GICP latency on Jetson |
 | global costmap `origin_x/y` | -0.5, -3.5 m | Robot starts 0.5 m inside left edge, centred laterally |
 | global costmap `width × height` | 10 × 7 m | Covers 6.88 m arena with ~1.5 m margins |
 | `default_nav_to_pose_bt_xml` | `navigate_to_pose_w_replanning_and_recovery.xml` | Humble-compatible BT; `RemovePassedGoals` not available in Humble |
@@ -102,12 +119,12 @@ To add the elevation layer back to the Nav2 costmap, uncomment the `elevation_la
 ```
 odom
  └── base_link          ← published by lunabotics_icp_localization at LiDAR rate
-      └── unilidar_lidar  ← static (tf_base_link.launch.py)
-           └── camera_link  ← static (30 cm forward, -15° pitch)
+      └── unilidar_lidar  ← static (tf_base_link.launch.py: 0.20 m forward, 0.60 m up)
+           └── camera_link  ← static (co-located, -38° pitch to face ground)
                 └── camera_depth_optical_frame  ← published by realsense2_camera
 ```
 
-Both costmaps set `transform_tolerance: 1.0` to cover GICP latency on the Jetson.  ICP
+All Nav2 servers set `transform_tolerance: 1.0` to cover GICP latency on the Jetson.  ICP
 publishes an IMU-predicted TF immediately at the scan timestamp so Nav2's message filter
 doesn't wait for GICP; the corrected TF follows at `stamp+1 ns` once GICP converges.
 

@@ -21,9 +21,9 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
   declare_parameter("max_correspondence_distance", 1.0); // ICP correspondence radisu
   declare_parameter("fitness_threshold", 0.8); // reject ICP results with fitness score above this (higher is worse)
   declare_parameter("submap_size", 8); // keep the last 8 scans merge into reference map
+  declare_parameter("submap_voxel_size", 0.07); // voxel size for merged submap (slightly coarser than input scans)
   declare_parameter("odom_frame", std::string("odom"));
   declare_parameter("base_frame", std::string("base_link"));
-  declare_parameter("lidar_frame", std::string("unilidar_lidar"));
 
   voxel_leaf_size_             = get_parameter("voxel_leaf_size").as_double();
   icp_range_clip_              = get_parameter("icp_range_clip").as_double();
@@ -31,9 +31,9 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
   max_correspondence_distance_ = get_parameter("max_correspondence_distance").as_double();
   fitness_threshold_           = get_parameter("fitness_threshold").as_double();
   submap_size_                 = get_parameter("submap_size").as_int();
+  submap_voxel_size_           = get_parameter("submap_voxel_size").as_double();
   odom_frame_                  = get_parameter("odom_frame").as_string();
   base_frame_                  = get_parameter("base_frame").as_string();
-  lidar_frame_                 = get_parameter("lidar_frame").as_string();
 
   // Configure GICP
   gicp_.setMaximumIterations(max_iterations_);
@@ -280,7 +280,10 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr IcpLocalizationNode::buildSubmap()
   pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled(new pcl::PointCloud<pcl::PointXYZ>);
   pcl::VoxelGrid<pcl::PointXYZ> vg;
   vg.setInputCloud(merged);
-  vg.setLeafSize(0.07f, 0.07f, 0.07f);
+  vg.setLeafSize(
+    static_cast<float>(submap_voxel_size_),
+    static_cast<float>(submap_voxel_size_),
+    static_cast<float>(submap_voxel_size_));
   vg.filter(*downsampled);
   return downsampled;
 }

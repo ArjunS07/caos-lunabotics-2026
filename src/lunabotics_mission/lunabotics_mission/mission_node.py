@@ -96,7 +96,7 @@ class MissionNode(Node):
         self.get_logger().info('*** AUTONOMY START — hands-free mode initiated ***')
         self.retry_count = 0
         self._transition(State.TRAVERSING)
-        self._send_nav_goal(block=True)
+        self._send_nav_goal()
 
         response.success = True
         response.message = 'Autonomy started — robot heading to Construction Zone'
@@ -120,13 +120,12 @@ class MissionNode(Node):
     # Navigation
     # ------------------------------------------------------------------
 
-    def _send_nav_goal(self, block=False):
+    def _send_nav_goal(self):
         if self.goal_handle is not None:
             self.goal_handle.cancel_goal_async()
             self.goal_handle = None
 
-        timeout = 5.0 if block else 0.0
-        if not self.nav_client.wait_for_server(timeout_sec=timeout):
+        if not self.nav_client.wait_for_server(timeout_sec=0.0):
             self.get_logger().error('Nav2 action server not available')
             return
 
@@ -148,7 +147,11 @@ class MissionNode(Node):
         future.add_done_callback(self._goal_response_cb)
 
     def _goal_response_cb(self, future):
-        self.goal_handle = future.result()
+        try:
+            self.goal_handle = future.result()
+        except Exception as e:
+            self.get_logger().error(f'Goal send failed: {e}')
+            return
         if not self.goal_handle.accepted:
             self.get_logger().error('Nav2 rejected goal')
             self.goal_handle = None
@@ -163,7 +166,13 @@ class MissionNode(Node):
                 f'Approaching Construction Zone (dist_to_goal={dist:.2f} m)')
 
     def _result_cb(self, future):
-        status = future.result().status
+        try:
+            status = future.result().status
+        except Exception as e:
+            self.get_logger().error(f'Goal result failed: {e}')
+            if self.state == State.TRAVERSING:
+                self._send_nav_goal()
+            return
 
         if status == GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().info('*** AUTONOMY COMPLETE — announce to MCJ ***')

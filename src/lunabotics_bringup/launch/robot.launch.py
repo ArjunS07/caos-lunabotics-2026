@@ -68,18 +68,18 @@ def generate_launch_description():
         ]),
     )
 
-    # Camera is 0 cm forward of LiDAR, tilted -38° downward
+    # Camera is co-located with LiDAR, tilted -38° downward to face the ground
     static_tf_lidar_camera = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='lidar_to_camera_tf',
         arguments=[
-            '0.0',    # X: 30 cm forward
-            '0.0',     # Y: centred
-            '0.0',     # Z: same height
-            '0.0',     # Yaw
-            '-0.663225', # Pitch: -38°
-            '0.0',     # Roll
+            '0.0',       # X: no offset
+            '0.0',       # Y: centred
+            '0.0',       # Z: same height
+            '0.0',       # Yaw
+            '-0.663225', # Pitch: -38° in radians
+            '0.0',       # Roll
             'unilidar_lidar',
             'camera_link',
         ],

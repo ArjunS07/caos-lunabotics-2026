@@ -25,7 +25,7 @@ bt_navigator:
       - nav2_round_robin_node_bt_node
       - nav2_transform_available_condition_bt_node
       - nav2_time_expired_condition_bt_node
-      - nav2_path_expiring_timer_condition
+      - nav2_path_expiring_timer_condition_bt_node
       - nav2_distance_traveled_condition_bt_node
       - nav2_single_trigger_bt_node
       - nav2_navigate_through_poses_action_bt_node
@@ -61,7 +61,7 @@ controller_server:
       max_lookahead_dist: 1.5
       lookahead_time: 1.5
       rotate_to_heading_angular_vel: 0.5
-      transform_tolerance: 0.1
+      transform_tolerance: 1.0     # matches costmap tolerance; GICP latency on Jetson can exceed 1 s
       use_velocity_scaled_lookahead_dist: true
       min_approach_linear_velocity: 0.05
       approach_velocity_scaling_dist: 0.6
@@ -108,7 +108,7 @@ behavior_server:
       plugin: nav2_behaviors/Wait
     global_frame: odom
     robot_base_frame: base_link
-    transform_tolerance: 0.1
+    transform_tolerance: 1.0     # matches costmap tolerance; GICP latency on Jetson can exceed 1 s
     simulate_ahead_time: 2.0
     max_rotational_vel: 0.5
     min_rotational_vel: 0.1
@@ -238,4 +238,3 @@ lifecycle_manager:
       - planner_server
       - behavior_server
       - bt_navigator
-      - lifecycle_manager_navigation

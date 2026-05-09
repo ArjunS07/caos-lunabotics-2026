@@ -1,7 +1,7 @@
 """Static transform: base_link → unilidar_lidar.
 
-Measured mount: 0.20 m forward (+X), 0.60 m up (+Z), 38° nose-down pitch
-(~-0.663 rad; REP-103, same sign as lidar→camera downward tilt).
+Measured mount: 0.20 m forward (+X), 0.60 m up (+Z), no rotation (LiDAR faces straight ahead).
+The -38° downward tilt is on the camera only (unilidar_lidar → camera_link in robot.launch.py).
 """
 
 from launch import LaunchDescription

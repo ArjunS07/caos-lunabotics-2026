@@ -46,17 +46,23 @@ source install/setup.bash
 
 ---
 
-## Running on the Jetson (competition / full stack)
+## Running (competition: Jetson + laptop)
 
+**On the Jetson** — sensors, localization, detection, Nav2:
 ```bash
 export ROS_DOMAIN_ID=42
 export ROS_LOCALHOST_ONLY=0
 source install/setup.bash
-ros2 launch lunabotics_bringup launch_jetson.py
+ros2 launch lunabotics_bringup robot.launch.py
 ```
 
-This starts: LiDAR, RealSense, TF, ICP localization, elevation mapping, crater detection,
-Nav2 (planner + controller + costmaps), and the mission FSM.
+**On the operator laptop** — Mission FSM and RViz:
+```bash
+export ROS_DOMAIN_ID=42
+export ROS_LOCALHOST_ONLY=0
+source install/setup.bash
+ros2 launch lunabotics_bringup laptop.launch.py
+```
 
 **Pre-launch checklist** (operator, before hands-free):
 1. Disable magnetometer on Unitree L2 IMU (see [ICP README](src/lunabotics_icp_localization/README.md#competition-compliance))
@@ -81,7 +87,7 @@ source install/setup.bash
 ros2 launch lunabotics_bringup launch.py
 ```
 
-Same as Jetson launch but also opens RViz.
+All nodes and RViz on one machine — use when a Jetson is not available.
 
 ---
 
@@ -120,10 +126,10 @@ Arena total: **6.88 m × 5.0 m**. Starting pose in odom frame: **(0, 0, 0°)** a
 
 | File | Purpose |
 |------|---------|
-| `launch_jetson.py` | Jetson only — no RViz |
-| `launch.py` | Single machine + RViz |
-| `launch_local.py` | RViz only, for a separate laptop on the same DDS domain |
-| `launch_bench_mvp.launch.py` | LiDAR-only bench test |
+| `robot.launch.py` | Jetson: hardware + processing (no Mission FSM, no RViz) |
+| `laptop.launch.py` | Operator laptop: Mission FSM + RViz only |
+| `launch_jetson.py` | Legacy all-in-one: full stack on one machine, no RViz |
+| `launch.py` | Dev: full stack + RViz on one machine |
 
 ---
 
