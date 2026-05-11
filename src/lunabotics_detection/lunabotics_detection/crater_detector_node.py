@@ -90,13 +90,18 @@ class CraterDetectorNode(Node):
         self.latest_depth_frame = msg.header.frame_id
 
     def _process(self):
-        if not self.cam_info_received or len(self.depth_deque) < self.avg_frames:
+        if not self.cam_info_received:
+            self.get_logger().info('Waiting for camera info')
+            return
+        if len(self.depth_deque) < self.avg_frames:
+            self.get_logger().info(f'Waiting for depth frames: {len(self.depth_deque)}/{self.avg_frames}')
             return
 
         # 1. Temporal average
         stack = np.stack(list(self.depth_deque), axis=0)
         # Check if there are any valid (non-NaN) values before averaging
         if not np.any(np.isfinite(stack)):
+            self.get_logger().warn('No valid depth data in stack')
             return
 
         with warnings.catch_warnings():
@@ -121,6 +126,7 @@ class CraterDetectorNode(Node):
         roi_valid = np.isfinite(roi_depth) & (roi_depth > 0.1)
 
         if roi_valid.sum() < 100:
+            self.get_logger().warn(f'Not enough valid points in ROI: {roi_valid.sum()}')
             return
 
         u_g, v_g = np.meshgrid(
@@ -139,6 +145,8 @@ class CraterDetectorNode(Node):
         A = np.column_stack([X, Y, Z])
         ones = np.ones(len(Z))
         plane, _, _, _ = np.linalg.lstsq(A, ones, rcond=None)  # [a,b,c]
+
+        self.get_logger().info(f'Plane fitted: {plane}')
 
         # Expected depth: plane · (ray * depth) = 1
         #   depth = 1 / (a*(u-cx)/fx + b*(v-cy)/fy + c)
@@ -175,7 +183,7 @@ class CraterDetectorNode(Node):
             dp=1.5,
             minDist=max_r_px,
             param1=50,
-            param2=15,
+            param2=10,
             minRadius=min_r_px,
             maxRadius=max_r_px,
         )
@@ -184,7 +192,11 @@ class CraterDetectorNode(Node):
 
         if circles is not None:
             circles = np.round(circles[0]).astype(int)
+            self.get_logger().info(f'Found {len(circles)} circle candidates')
             for (u_c, v_c, r_px) in circles:
+                # Clamp to image bounds
+                u_c = max(0, min(u_c, W - 1))
+                v_c = max(0, min(v_c, H - 1))
                 # 7. Validate: interior mean depth > rim mean depth + threshold/2
                 mask_inner = np.zeros((H, W), dtype=np.uint8)
                 cv2.circle(mask_inner, (u_c, v_c), max(1, r_px // 2), 255, -1)
@@ -214,6 +226,10 @@ class CraterDetectorNode(Node):
                 r_m = (r_px / fx) * float(rim_ok.mean())
 
                 detections_3d.append((X_c, Y_c, Z_c, r_m))
+        else:
+            self.get_logger().info('No circles found')
+
+        self.get_logger().info(f'Valid detections: {len(detections_3d)}')
 
         # 9. Transform to odom frame
         source_frame = self.latest_depth_frame
@@ -225,7 +241,8 @@ class CraterDetectorNode(Node):
                 stamp, timeout=Duration(seconds=0.1))
         except (tf2_ros.LookupException,
                 tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException):
+                tf2_ros.ExtrapolationException) as e:
+            self.get_logger().warn(f'TF lookup failed: {e}')
             return
 
         pose_array = PoseArray()
@@ -261,6 +278,7 @@ class CraterDetectorNode(Node):
             ring.lifetime.sec    = 2
             marker_array.markers.append(ring)
 
+        self.get_logger().info(f'Publishing {len(pose_array.poses)} crater detections')
         self.pose_pub.publish(pose_array)
         self.marker_pub.publish(marker_array)
 

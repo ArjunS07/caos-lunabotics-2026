@@ -1,0 +1,14 @@
+digraph G {
+"unilidar_imu_initial" -> "unilidar_imu"[label=" Broadcaster: default_authority\nAverage rate: 233.99\nBuffer length: 5.308\nMost recent transform: 1777784337.707633\nOldest transform: 1777784332.399706\n"];
+"unilidar_imu" -> "unilidar_lidar"[label=" Broadcaster: default_authority\nAverage rate: 230.675\nBuffer length: 5.306\nMost recent transform: 1777784337.707633\nOldest transform: 1777784332.401472\n"];
+"odom" -> "base_link"[label=" Broadcaster: default_authority\nAverage rate: 6.604\nBuffer length: 9.237\nMost recent transform: 1777784337.632288\nOldest transform: 1777784328.395408\n"];
+"unilidar_lidar" -> "camera_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_link" -> "camera_depth_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_depth_frame" -> "camera_depth_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_link" -> "camera_color_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_color_frame" -> "camera_color_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1777784337.7521632"[ shape=plaintext ] ;
+}->"odom";
+}
