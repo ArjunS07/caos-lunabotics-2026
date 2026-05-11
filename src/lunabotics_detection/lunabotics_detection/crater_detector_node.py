@@ -18,6 +18,7 @@ import warnings
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.time import Time
 
 import cv2
 import numpy as np
@@ -235,13 +236,27 @@ class CraterDetectorNode(Node):
         source_frame = self.latest_depth_frame
         stamp        = self.latest_depth_stamp
 
+        # Prefer exact depth stamp so poses match the image time. RealSense and
+        # LiDAR clocks can diverge slightly; odom→base_link is stamped from LiDAR
+        # callbacks, so an exact lookup may ask for a time newer than the latest
+        # odom TF → ExtrapolationException. Fall back to latest transform (valid
+        # when the robot is static or moving slowly vs processing latency).
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.output_frame, source_frame,
-                stamp, timeout=Duration(seconds=0.1))
+                stamp, timeout=Duration(seconds=0.2))
+        except tf2_ros.ExtrapolationException:
+            try:
+                tf = self.tf_buffer.lookup_transform(
+                    self.output_frame, source_frame,
+                    Time(), timeout=Duration(seconds=0.2))
+            except (tf2_ros.LookupException,
+                    tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException) as e:
+                self.get_logger().warn(f'TF lookup failed: {e}')
+                return
         except (tf2_ros.LookupException,
-                tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException) as e:
+                tf2_ros.ConnectivityException) as e:
             self.get_logger().warn(f'TF lookup failed: {e}')
             return
 
