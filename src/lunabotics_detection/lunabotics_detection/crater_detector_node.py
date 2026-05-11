@@ -189,7 +189,7 @@ class CraterDetectorNode(Node):
         )
 
         detections_3d = []
-
+  
         if circles is not None:
             circles = np.round(circles[0]).astype(int)
             self.get_logger().info(f'Found {len(circles)} circle candidates')
