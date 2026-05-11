@@ -62,8 +62,8 @@ IcpLocalizationNode::IcpLocalizationNode(const rclcpp::NodeOptions & options)
   // (VOLATILE QoS — no historical TF) and the first scans are dropped.
   publishPose(this->now(), current_pose_);
 
-  // Keep publishing at wall-clock time every 100 ms until the first cloud
-  // arrives and ICP takes over.  The timer cancels itself on first scan.
+  // Keep publishing at wall-clock time every 100 ms until the first non-empty
+  // cloud after range clip (then LiDAR-stamped TF covers the message filter).
   keepalive_timer_ = create_wall_timer(
     std::chrono::milliseconds(100),
     [this]() {
@@ -134,7 +134,7 @@ void IcpLocalizationNode::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg
 
 void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
-  first_scan_received_ = true;
+  const rclcpp::Time stamp(msg->header.stamp);
 
   // Convert to PCL
   pcl::PointCloud<pcl::PointXYZ>::Ptr raw(new pcl::PointCloud<pcl::PointXYZ>);
@@ -154,6 +154,14 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
   }
 
   if (clipped->empty()) {
+    // Still publish odom→base_link at the LiDAR stamp so Nav2 costmap message
+    // filters can transform /unilidar/cloud. Otherwise keepalive (wall-clock
+    // stamps) can be the only TF while cloud headers use the LiDAR clock — then
+    // cloud time is "earlier than all data in the transform cache".
+    {
+      std::lock_guard<std::mutex> lock(pose_mutex_);
+      publishPose(stamp, current_pose_ * imu_delta_);
+    }
     RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
       "Cloud empty after range clip — skipping frame");
     return;
@@ -171,8 +179,6 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
     vg.filter(*current_scan);
   }
 
-  const rclcpp::Time stamp = msg->header.stamp;
-
   // Publish IMU-predicted TF immediately so Nav2's message filter doesn't
   // wait for GICP. GICP runs in a background thread and takes > 1 s on the
   // Jetson; without this every scan would be dropped before TF is available.
@@ -180,6 +186,10 @@ void IcpLocalizationNode::cloudCallback(const sensor_msgs::msg::PointCloud2::Sha
     std::lock_guard<std::mutex> lock(pose_mutex_);
     publishPose(stamp, current_pose_ * imu_delta_);
   }
+  // Stop wall-clock keepalive only once LiDAR-timeline TF is flowing (non-empty
+  // cloud path). Setting this before the empty check used to cancel keepalive
+  // while still having only now()-stamped TF vs LiDAR-stamped clouds.
+  first_scan_received_ = true;
 
   // Queue for background GICP (keep only the latest scan — always work on
   // the most current geometry rather than a stale backlog).
